@@ -2,6 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import { MongoClient } from 'mongodb';
 import 'dotenv/config'
+import { ObjectId } from "mongodb";
 
 const app = express()
 const PORT = 8000
@@ -42,6 +43,32 @@ app.get('/upcoming-events', async (req, res) => {
   const result = await eventsCollection.find({ status: "upcoming" }).toArray()
   res.send(result)
 })
+app.get("/events/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const query = ObjectId.isValid(id)
+      ? { _id: new ObjectId(id) }
+      : { _id: id };
+
+    const result = await eventsCollection.findOne(query);
+
+    if (!result) {
+      return res.status(404).send({
+        message: "Event not found",
+      });
+    }
+
+    res.send({ result });
+  } catch (error) {
+    res.status(500).send({
+      message: "Internal Server Error",
+    });
+  }
+});
+
+
+
 // http://localhost:8000
 
 app.get('/', (req, res) => {
