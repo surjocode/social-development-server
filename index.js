@@ -32,9 +32,9 @@ const eventsCollection = db.collection('events')
 
 app.post('/dashboard/create-event', async (req, res) => {
   const data = req.body
- const result = await eventsCollection.insertOne(data)
- console.log(result)
-  res.send({result})
+  const result = await eventsCollection.insertOne(data)
+  console.log(result)
+  res.send({ result })
 })
 
 
@@ -72,9 +72,9 @@ app.get("/events/:id", async (req, res) => {
 // http://localhost:8000
 
 app.get('/', (req, res) => {
-    res.send({message: 'Server is running fine!'})
+  res.send({ message: 'Server is running fine!' })
 })
 
 app.listen(PORT, () => {
-    console.log(`Server is running at ${PORT}`);
+  console.log(`Server is running at ${PORT}`);
 })
