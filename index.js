@@ -1,10 +1,12 @@
 import express from 'express'
-
+import cors from 'cors'
 import { MongoClient } from 'mongodb';
 import 'dotenv/config'
 
 const app = express()
 const PORT = 8000
+app.use(cors())
+app.use(express.json())
 
 
 
@@ -22,9 +24,24 @@ export async function connectToMongoDB() {
 }
 
 
-connectToMongoDB()
+const mongodbClient = await connectToMongoDB()
+
+const db = mongodbClient.db('helping-hands')
+const eventsCollection = db.collection('events')
+
+app.post('/dashboard/create-event', async (req, res) => {
+  const data = req.body
+ const result = await eventsCollection.insertOne(data)
+ console.log(result)
+  res.send({result})
+})
 
 
+
+app.get('/upcoming-events', async (req, res) => {
+  const result = await eventsCollection.find({ status: "upcoming" }).toArray()
+  res.send(result)
+})
 // http://localhost:8000
 
 app.get('/', (req, res) => {
