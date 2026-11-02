@@ -30,13 +30,40 @@ const mongodbClient = await connectToMongoDB()
 const db = mongodbClient.db('helping-hands')
 const eventsCollection = db.collection('events')
 
-app.post('/dashboard/create-event', async (req, res) => {
-  const data = req.body
-  const result = await eventsCollection.insertOne(data)
-  console.log(result)
-  res.send({ result })
-})
 
+app.post("/dashboard/create-event", async (req, res) => {
+  try {
+    const data = req.body;
+    const result = await eventsCollection.insertOne(data);
+
+    res.status(201).send({
+      message: "Event created successfully",
+      result,
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).send({
+      message: "Failed to create event",
+    });
+  }
+});
+
+
+app.get("/my-created-events/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+    const result = await eventsCollection.find({ email }).toArray();
+
+    res.send(result);
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).send({
+      message: "Failed to fetch events",
+    });
+  }
+});
 
 
 app.get('/upcoming-events', async (req, res) => {
