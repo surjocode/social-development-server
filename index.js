@@ -29,6 +29,7 @@ const mongodbClient = await connectToMongoDB()
 
 const db = mongodbClient.db('helping-hands')
 const eventsCollection = db.collection('events')
+const joinedEventsCollection = db.collection('joinedEvents')
 
 
 app.post("/dashboard/create-event", async (req, res) => {
@@ -151,6 +152,90 @@ app.delete("/dashboard/delete-event/:id", async (req, res) => {
 });
 
 
+app.post("/join-event", async (req, res) => {
+  try {
+    const { eventId, userEmail, userName } = req.body;
+
+    if (!eventId || !userEmail) {
+      return res.status(400).send({
+        message: "Event ID and email are required",
+      });
+    }
+
+    if (!ObjectId.isValid(eventId)) {
+      return res.status(400).send({
+        message: "Invalid event ID",
+      });
+    }
+
+    const event = await eventsCollection.findOne({
+      _id: new ObjectId(eventId),
+    });
+
+    if (!event) {
+      return res.status(404).send({
+        message: "Event not found",
+      });
+    }
+
+    const alreadyJoined = await joinedEventsCollection.findOne({
+      eventId,
+      userEmail,
+    });
+
+    if (alreadyJoined) {
+      return res.status(409).send({
+        message: "You already joined this event",
+      });
+    }
+
+    const result = await joinedEventsCollection.insertOne({
+      eventId,
+      userEmail,
+      userName: userName || "",
+      joinedAt: new Date(),
+    });
+
+    res.status(201).send({
+      message: "Successfully joined the event",
+      result,
+    });
+  } catch (error) {
+    console.error("Join event error:", error);
+
+    res.status(500).send({
+      message: "Failed to join event",
+    });
+  }
+});
+
+
+
+app.get("/my-joined-events/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+
+    const joinedEvents = await joinedEventsCollection
+      .find({ userEmail: email })
+      .toArray();
+
+    const eventIds = joinedEvents.map(
+      (item) => new ObjectId(item.eventId)
+    );
+
+    const events = await eventsCollection
+      .find({ _id: { $in: eventIds } })
+      .toArray();
+
+    res.status(200).send(events);
+  } catch (error) {
+    console.error("My joined events error:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch joined events",
+    });
+  }
+});
 
 // http://localhost:8000
 
