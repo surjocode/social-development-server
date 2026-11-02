@@ -152,6 +152,7 @@ app.delete("/dashboard/delete-event/:id", async (req, res) => {
 });
 
 
+
 app.post("/join-event", async (req, res) => {
   try {
     const { eventId, userEmail, userName } = req.body;
@@ -178,6 +179,15 @@ app.post("/join-event", async (req, res) => {
       });
     }
 
+    // Creator cannot join own event
+    if (
+      event.email?.toLowerCase() === userEmail.toLowerCase()
+    ) {
+      return res.status(403).send({
+        message: "You cannot join your own event",
+      });
+    }
+
     const alreadyJoined = await joinedEventsCollection.findOne({
       eventId,
       userEmail,
@@ -196,6 +206,11 @@ app.post("/join-event", async (req, res) => {
       joinedAt: new Date(),
     });
 
+    await eventsCollection.updateOne(
+      { _id: new ObjectId(eventId) },
+      { $inc: { joined: 1 } }
+    );
+
     res.status(201).send({
       message: "Successfully joined the event",
       result,
@@ -204,7 +219,7 @@ app.post("/join-event", async (req, res) => {
     console.error("Join event error:", error);
 
     res.status(500).send({
-      message: "Failed to join event",
+      message: "Failed to join the event",
     });
   }
 });
@@ -215,11 +230,11 @@ app.get("/my-joined-events/:email", async (req, res) => {
   try {
     const email = req.params.email;
 
-    const joinedEvents = await joinedEventsCollection
+    const joinedRecords = await joinedEventsCollection
       .find({ userEmail: email })
       .toArray();
 
-    const eventIds = joinedEvents.map(
+    const eventIds = joinedRecords.map(
       (item) => new ObjectId(item.eventId)
     );
 
@@ -227,12 +242,62 @@ app.get("/my-joined-events/:email", async (req, res) => {
       .find({ _id: { $in: eventIds } })
       .toArray();
 
-    res.status(200).send(events);
+    const joinedEvents = events.map((event) => {
+      const joinedRecord = joinedRecords.find(
+        (item) => item.eventId === event._id.toString()
+      );
+
+      return {
+        ...event,
+        joinedAt: joinedRecord?.joinedAt || null,
+      };
+    });
+
+    res.status(200).send(joinedEvents);
   } catch (error) {
     console.error("My joined events error:", error);
 
     res.status(500).send({
       message: "Failed to fetch joined events",
+    });
+  }
+});
+
+
+app.delete("/leave-event", async (req, res) => {
+  try {
+    const { eventId, userEmail } = req.body;
+
+    if (!eventId || !userEmail) {
+      return res.status(400).send({
+        message: "Event ID and email are required",
+      });
+    }
+
+    const result = await joinedEventsCollection.deleteOne({
+      eventId,
+      userEmail,
+    });
+
+   if (result.deletedCount === 0) {
+  return res.status(404).send({
+    message: "Joined event not found",
+  });
+}
+
+await eventsCollection.updateOne(
+  { _id: new ObjectId(eventId) },
+  { $inc: { joined: -1 } }
+);
+
+    res.status(200).send({
+      message: "Successfully left the event",
+    });
+  } catch (error) {
+    console.error("Leave event error:", error);
+
+    res.status(500).send({
+      message: "Failed to leave event",
     });
   }
 });
