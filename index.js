@@ -124,6 +124,33 @@ app.get("/events/:id", async (req, res) => {
 });
 
 
+app.delete("/dashboard/delete-event/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await eventsCollection.deleteOne({
+      _id: new ObjectId(id),
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).send({
+        message: "Event not found",
+      });
+    }
+
+    res.status(200).send({
+      message: "Event deleted successfully",
+    });
+  } catch (error) {
+    console.error("Delete event error:", error);
+
+    res.status(500).send({
+      message: "Failed to delete event",
+    });
+  }
+});
+
+
 
 // http://localhost:8000
 
