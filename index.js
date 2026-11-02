@@ -65,6 +65,35 @@ app.get("/my-created-events/:email", async (req, res) => {
   }
 });
 
+app.patch("/dashboard/update-event/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updatedData = req.body;
+
+    const result = await eventsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updatedData }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        message: "Event not found",
+      });
+    }
+
+    res.status(200).send({
+      message: "Event updated successfully",
+      result,
+    });
+  } catch (error) {
+    console.error("Update event error:", error);
+
+    res.status(500).send({
+      message: "Failed to update event",
+    });
+  }
+});
+
 
 app.get('/upcoming-events', async (req, res) => {
   const result = await eventsCollection.find({ status: "upcoming" }).toArray()
