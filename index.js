@@ -4,6 +4,7 @@ import { MongoClient } from 'mongodb';
 import 'dotenv/config'
 import { ObjectId } from "mongodb";
 import { jwtVerify, createRemoteJWKSet } from "jose";
+import "dotenv/config";
 
 const app = express()
 const PORT = 8000
@@ -34,8 +35,14 @@ const joinedEventsCollection = db.collection('joinedEvents')
 
 
 
-const AUTH_BASE_URL =
-  process.env.BETTER_AUTH_URL || "http://localhost:3000";
+
+
+
+const AUTH_BASE_URL = process.env.BETTER_AUTH_URL;
+
+if (!AUTH_BASE_URL) {
+  throw new Error("BETTER_AUTH_URL is missing from .env");
+}
 
 const JWKS = createRemoteJWKSet(
   new URL(`${AUTH_BASE_URL}/api/auth/jwks`)
@@ -75,6 +82,8 @@ const verifyToken = async (req, res, next) => {
     });
   }
 };
+
+export { verifyToken };
 
 
 app.post("/dashboard/create-event", verifyToken, async (req, res) => {
@@ -459,3 +468,5 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server is running at ${PORT}`);
 })
+
+export default app
