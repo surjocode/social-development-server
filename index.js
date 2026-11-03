@@ -246,7 +246,6 @@ app.delete("/dashboard/delete-event/:id", verifyToken, async (req, res) => {
 
 
 
-
 app.post("/join-event", verifyToken, async (req, res) => {
   try {
     const { eventId, userName } = req.body;
@@ -303,14 +302,14 @@ app.post("/join-event", verifyToken, async (req, res) => {
       { $inc: { joined: 1 } }
     );
 
-    res.status(201).send({
+    return res.status(201).send({
       message: "Successfully joined the event",
       result,
     });
   } catch (error) {
     console.error("Join event error:", error);
 
-    res.status(500).send({
+    return res.status(500).send({
       message: "Failed to join the event",
     });
   }
@@ -318,6 +317,53 @@ app.post("/join-event", verifyToken, async (req, res) => {
 
 
 
+app.delete("/leave-event", verifyToken, async (req, res) => {
+  try {
+    const { eventId } = req.body;
+    const userEmail = req.user.email;
+
+    if (!eventId) {
+      return res.status(400).send({
+        message: "Event ID is required",
+      });
+    }
+
+    if (!ObjectId.isValid(eventId)) {
+      return res.status(400).send({
+        message: "Invalid event ID",
+      });
+    }
+
+    const result = await joinedEventsCollection.deleteOne({
+      eventId,
+      userEmail,
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).send({
+        message: "You have not joined this event",
+      });
+    }
+
+    await eventsCollection.updateOne(
+      { _id: new ObjectId(eventId) },
+      { $inc: { joined: -1 } }
+    );
+
+    return res.status(200).send({
+      message: "Successfully left the event",
+    });
+  } catch (error) {
+    console.error("Leave event error:", error);
+
+    return res.status(500).send({
+      message: "Failed to leave the event",
+    });
+  }
+});
+
+
+
 app.get("/my-joined-events/:email", verifyToken, async (req, res) => {
   try {
     const email = req.params.email;
@@ -361,48 +407,8 @@ app.get("/my-joined-events/:email", verifyToken, async (req, res) => {
   }
 });
 
-app.get("/my-joined-events/:email", verifyToken, async (req, res) => {
-  try {
-    const email = req.params.email;
 
-    if (email.toLowerCase() !== req.user.email.toLowerCase()) {
-      return res.status(403).send({
-        message: "Access denied",
-      });
-    }
 
-    const joinedRecords = await joinedEventsCollection
-      .find({ userEmail: email })
-      .toArray();
-
-    const eventIds = joinedRecords.map(
-      (item) => new ObjectId(item.eventId)
-    );
-
-    const events = await eventsCollection
-      .find({ _id: { $in: eventIds } })
-      .toArray();
-
-    const joinedEvents = events.map((event) => {
-      const joinedRecord = joinedRecords.find(
-        (item) => item.eventId === event._id.toString()
-      );
-
-      return {
-        ...event,
-        joinedAt: joinedRecord?.joinedAt || null,
-      };
-    });
-
-    res.status(200).send(joinedEvents);
-  } catch (error) {
-    console.error("My joined events error:", error);
-
-    res.status(500).send({
-      message: "Failed to fetch joined events",
-    });
-  }
-});
 
 
 
@@ -426,25 +432,6 @@ app.get("/recent-events", async (req, res) => {
 });
 
 
-
-
-app.get("/recent-events", async (req, res) => {
-  try {
-    const result = await eventsCollection
-      .find()
-      .sort({ _id: -1 })
-      .limit(6)
-      .toArray();
-
-    res.status(200).send(result);
-  } catch (error) {
-    console.error("Recent events error:", error);
-
-    res.status(500).send({
-      message: "Failed to fetch recent events",
-    });
-  }
-});
 
 
 
