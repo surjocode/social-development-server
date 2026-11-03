@@ -3,6 +3,7 @@ import cors from 'cors'
 import { MongoClient } from 'mongodb';
 import 'dotenv/config'
 import { ObjectId } from "mongodb";
+import { jwtVerify, createRemoteJWKSet } from "jose";
 
 const app = express()
 const PORT = 8000
@@ -32,9 +33,57 @@ const eventsCollection = db.collection('events')
 const joinedEventsCollection = db.collection('joinedEvents')
 
 
-app.post("/dashboard/create-event", async (req, res) => {
+
+const AUTH_BASE_URL =
+  process.env.BETTER_AUTH_URL || "http://localhost:3000";
+
+const JWKS = createRemoteJWKSet(
+  new URL(`${AUTH_BASE_URL}/api/auth/jwks`)
+);
+
+const verifyToken = async (req, res, next) => {
   try {
-    const data = req.body;
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).send({
+        message: "Authorization token missing",
+      });
+    }
+
+    const token = authHeader.split(" ")[1];
+
+    const { payload } = await jwtVerify(token, JWKS, {
+      issuer: AUTH_BASE_URL,
+      audience: AUTH_BASE_URL,
+    });
+
+    if (!payload.email) {
+      return res.status(401).send({
+        message: "User email not found in token",
+      });
+    }
+
+    req.user = payload;
+
+    next();
+  } catch (error) {
+    console.error("JWT verification failed:", error);
+
+    return res.status(401).send({
+      message: "Invalid or expired token",
+    });
+  }
+};
+
+
+app.post("/dashboard/create-event", verifyToken, async (req, res) => {
+  try {
+    const data = {
+      ...req.body,
+      email: req.user.email,
+    };
+
     const result = await eventsCollection.insertOne(data);
 
     res.status(201).send({
@@ -42,7 +91,7 @@ app.post("/dashboard/create-event", async (req, res) => {
       result,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Create event error:", error);
 
     res.status(500).send({
       message: "Failed to create event",
@@ -51,14 +100,21 @@ app.post("/dashboard/create-event", async (req, res) => {
 });
 
 
-app.get("/my-created-events/:email", async (req, res) => {
+app.get("/my-created-events/:email", verifyToken, async (req, res) => {
   try {
     const email = req.params.email;
+
+    if (email.toLowerCase() !== req.user.email.toLowerCase()) {
+      return res.status(403).send({
+        message: "Access denied",
+      });
+    }
+
     const result = await eventsCollection.find({ email }).toArray();
 
-    res.send(result);
+    res.status(200).send(result);
   } catch (error) {
-    console.error(error);
+    console.error("My created events error:", error);
 
     res.status(500).send({
       message: "Failed to fetch events",
@@ -66,19 +122,33 @@ app.get("/my-created-events/:email", async (req, res) => {
   }
 });
 
-app.patch("/dashboard/update-event/:id", async (req, res) => {
+
+app.patch("/dashboard/update-event/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const updatedData = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        message: "Invalid event ID",
+      });
+    }
+
+    const updatedData = { ...req.body };
+    delete updatedData.email;
 
     const result = await eventsCollection.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: updatedData }
+      {
+        _id: new ObjectId(id),
+        email: req.user.email,
+      },
+      {
+        $set: updatedData,
+      }
     );
 
     if (result.matchedCount === 0) {
       return res.status(404).send({
-        message: "Event not found",
+        message: "Event not found or access denied",
       });
     }
 
@@ -96,10 +166,23 @@ app.patch("/dashboard/update-event/:id", async (req, res) => {
 });
 
 
-app.get('/upcoming-events', async (req, res) => {
-  const result = await eventsCollection.find({ status: "upcoming" }).toArray()
-  res.send(result)
-})
+
+app.get("/upcoming-events", async (req, res) => {
+  try {
+    const result = await eventsCollection
+      .find({ status: "upcoming" })
+      .toArray();
+
+    res.status(200).send(result);
+  } catch (error) {
+    console.error("Upcoming events error:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch upcoming events",
+    });
+  }
+});
+
 app.get("/events/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -116,8 +199,10 @@ app.get("/events/:id", async (req, res) => {
       });
     }
 
-    res.send({ result });
+    res.status(200).send({ result });
   } catch (error) {
+    console.error("Get event error:", error);
+
     res.status(500).send({
       message: "Internal Server Error",
     });
@@ -125,17 +210,25 @@ app.get("/events/:id", async (req, res) => {
 });
 
 
-app.delete("/dashboard/delete-event/:id", async (req, res) => {
+
+app.delete("/dashboard/delete-event/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
 
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        message: "Invalid event ID",
+      });
+    }
+
     const result = await eventsCollection.deleteOne({
       _id: new ObjectId(id),
+      email: req.user.email,
     });
 
     if (result.deletedCount === 0) {
       return res.status(404).send({
-        message: "Event not found",
+        message: "Event not found or access denied",
       });
     }
 
@@ -153,13 +246,15 @@ app.delete("/dashboard/delete-event/:id", async (req, res) => {
 
 
 
-app.post("/join-event", async (req, res) => {
-  try {
-    const { eventId, userEmail, userName } = req.body;
 
-    if (!eventId || !userEmail) {
+app.post("/join-event", verifyToken, async (req, res) => {
+  try {
+    const { eventId, userName } = req.body;
+    const userEmail = req.user.email;
+
+    if (!eventId) {
       return res.status(400).send({
-        message: "Event ID and email are required",
+        message: "Event ID is required",
       });
     }
 
@@ -179,10 +274,7 @@ app.post("/join-event", async (req, res) => {
       });
     }
 
-    // Creator cannot join own event
-    if (
-      event.email?.toLowerCase() === userEmail.toLowerCase()
-    ) {
+    if (event.email?.toLowerCase() === userEmail.toLowerCase()) {
       return res.status(403).send({
         message: "You cannot join your own event",
       });
@@ -226,9 +318,58 @@ app.post("/join-event", async (req, res) => {
 
 
 
-app.get("/my-joined-events/:email", async (req, res) => {
+app.get("/my-joined-events/:email", verifyToken, async (req, res) => {
   try {
     const email = req.params.email;
+
+    if (email.toLowerCase() !== req.user.email.toLowerCase()) {
+      return res.status(403).send({
+        message: "Access denied",
+      });
+    }
+
+    const joinedRecords = await joinedEventsCollection
+      .find({ userEmail: email })
+      .toArray();
+
+    const eventIds = joinedRecords.map(
+      (item) => new ObjectId(item.eventId)
+    );
+
+    const events = await eventsCollection
+      .find({ _id: { $in: eventIds } })
+      .toArray();
+
+    const joinedEvents = events.map((event) => {
+      const joinedRecord = joinedRecords.find(
+        (item) => item.eventId === event._id.toString()
+      );
+
+      return {
+        ...event,
+        joinedAt: joinedRecord?.joinedAt || null,
+      };
+    });
+
+    res.status(200).send(joinedEvents);
+  } catch (error) {
+    console.error("My joined events error:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch joined events",
+    });
+  }
+});
+
+app.get("/my-joined-events/:email", verifyToken, async (req, res) => {
+  try {
+    const email = req.params.email;
+
+    if (email.toLowerCase() !== req.user.email.toLowerCase()) {
+      return res.status(403).send({
+        message: "Access denied",
+      });
+    }
 
     const joinedRecords = await joinedEventsCollection
       .find({ userEmail: email })
@@ -264,40 +405,60 @@ app.get("/my-joined-events/:email", async (req, res) => {
 });
 
 
-app.delete("/leave-event", async (req, res) => {
+
+
+app.get("/recent-events", async (req, res) => {
   try {
-    const { eventId, userEmail } = req.body;
+    const result = await eventsCollection
+      .find()
+      .sort({ _id: -1 })
+      .limit(6)
+      .toArray();
 
-    if (!eventId || !userEmail) {
-      return res.status(400).send({
-        message: "Event ID and email are required",
-      });
-    }
-
-    const result = await joinedEventsCollection.deleteOne({
-      eventId,
-      userEmail,
-    });
-
-   if (result.deletedCount === 0) {
-  return res.status(404).send({
-    message: "Joined event not found",
-  });
-}
-
-await eventsCollection.updateOne(
-  { _id: new ObjectId(eventId) },
-  { $inc: { joined: -1 } }
-);
-
-    res.status(200).send({
-      message: "Successfully left the event",
-    });
+    res.status(200).send(result);
   } catch (error) {
-    console.error("Leave event error:", error);
+    console.error("Recent events error:", error);
 
     res.status(500).send({
-      message: "Failed to leave event",
+      message: "Failed to fetch recent events",
+    });
+  }
+});
+
+
+
+
+app.get("/recent-events", async (req, res) => {
+  try {
+    const result = await eventsCollection
+      .find()
+      .sort({ _id: -1 })
+      .limit(6)
+      .toArray();
+
+    res.status(200).send(result);
+  } catch (error) {
+    console.error("Recent events error:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch recent events",
+    });
+  }
+});
+
+
+
+
+app.get("/events", async (req, res) => {
+  try {
+    const result = await eventsCollection.find().toArray();
+
+    res.status(200).send(result);
+  } catch (error) {
+    console.error("Get events error:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch events",
     });
   }
 });
